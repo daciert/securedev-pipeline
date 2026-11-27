@@ -1,0 +1,5 @@
+# Forzar finales de línea LF (Linux) para que los scripts funcionen en los contenedores
+* text=auto eol=lf
+*.png binary
+*.docx binary
+*.pdf binary
