@@ -1,0 +1,4 @@
+# Herramientas de calidad y seguridad usadas por el pipeline (no van a producción)
+pytest==8.4.2
+bandit==1.8.6
+pip-audit==2.9.0
