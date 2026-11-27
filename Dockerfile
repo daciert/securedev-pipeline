@@ -1,5 +1,5 @@
 # Línea base VULNERABLE (se corrige en commits posteriores)
-FROM python:3.11.4-slim
+FROM python:3.15.2-slim
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
