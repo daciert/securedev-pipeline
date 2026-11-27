@@ -39,9 +39,8 @@ pipeline {
             steps {
                 sh '''
                     python3 -m venv .venv
-                    . .venv/bin/activate
-                    pip install --quiet --upgrade pip
-                    pip install --quiet -r requirements.txt -r requirements-dev.txt
+                    .venv/bin/pip install --quiet --upgrade pip
+                    .venv/bin/pip install --quiet -r requirements.txt -r requirements-dev.txt
                     docker build -t ${IMAGE} -t securedev-app:latest .
                 '''
             }
@@ -51,9 +50,9 @@ pipeline {
             steps {
                 catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                     sh '''
-                        . .venv/bin/activate
-                        bandit -r app -f html -o reports/bandit.html --exit-zero
-                        bandit -r app -ll -f txt -o reports/bandit.txt; rc=$?
+                        .venv/bin/bandit -q -r app -f html -o reports/bandit.html --exit-zero
+                        rc=0
+                        .venv/bin/bandit -q -r app -ll -f txt -o reports/bandit.txt || rc=$?
                         cat reports/bandit.txt
                         exit $rc
                     '''
@@ -65,9 +64,9 @@ pipeline {
             steps {
                 catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                     sh '''
-                        . .venv/bin/activate
-                        pip-audit -r requirements.txt --no-deps --desc -f markdown -o reports/pip-audit.md; rc=$?
-                        cat reports/pip-audit.md
+                        .venv/bin/pip-audit -r requirements.txt --no-deps --desc -f markdown -o reports/pip-audit.md || true
+                        rc=0
+                        .venv/bin/pip-audit -r requirements.txt --no-deps -f columns || rc=$?
                         exit $rc
                     '''
                 }
@@ -77,13 +76,11 @@ pipeline {
         stage('Pruebas') {
             steps {
                 sh '''
-                    . .venv/bin/activate
-                    pytest tests/test_funcional.py -v --junitxml=reports/junit-funcional.xml
+                    .venv/bin/pytest tests/test_funcional.py -v -p no:warnings --junitxml=reports/junit-funcional.xml
                 '''
                 catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                     sh '''
-                        . .venv/bin/activate
-                        pytest tests/test_seguridad.py -v --junitxml=reports/junit-seguridad.xml
+                        .venv/bin/pytest tests/test_seguridad.py -v -p no:warnings --tb=line --junitxml=reports/junit-seguridad.xml
                     '''
                 }
             }
@@ -110,9 +107,10 @@ pipeline {
                     sh '''
                         chmod 777 /zap/wrk
                         rm -f /zap/wrk/zap-report.*
+                        rc=0
                         docker run --rm --network ${NET} -v zap-wrk:/zap/wrk:rw zaproxy/zap-stable \
                             zap-full-scan.py -t http://${STAGING}:5000 -m 2 -T 20 \
-                            -r zap-report.html -J zap-report.json -w zap-report.md; rc=$?
+                            -r zap-report.html -J zap-report.json -w zap-report.md || rc=$?
                         cp /zap/wrk/zap-report.* reports/ 2>/dev/null || true
                         exit $rc
                     '''
