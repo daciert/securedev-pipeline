@@ -5,4 +5,4 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY app/ .
 EXPOSE 5000
-CMD ["sh", "-c", "python init_db.py && flask --app app run --host=0.0.0.0 --port=5000 --debug"]
+CMD ["sh", "-c", "python init_db.py && flask --app app --debug run --host=0.0.0.0 --port=5000"]
