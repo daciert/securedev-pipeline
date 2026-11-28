@@ -10,8 +10,8 @@ import pytest
 APP_DIR = pathlib.Path(__file__).resolve().parents[1] / "app"
 sys.path.insert(0, str(APP_DIR))
 
-ADMIN = (os.environ.get("TEST_ADMIN_USER", "admin"), os.environ.get("TEST_ADMIN_PASS", "admin123"))
-ALUMNO = (os.environ.get("TEST_ALUMNO_USER", "alumno"), os.environ.get("TEST_ALUMNO_PASS", "12345"))
+ADMIN = (os.environ.get("TEST_ADMIN_USER", "admin"), os.environ.get("TEST_ADMIN_PASS", "Adm1n-SecureDev-2026"))
+ALUMNO = (os.environ.get("TEST_ALUMNO_USER", "alumno"), os.environ.get("TEST_ALUMNO_PASS", "Alumn0-SecureDev-2026"))
 
 
 def _cargar(nombre, archivo):
@@ -25,6 +25,8 @@ def _cargar(nombre, archivo):
 def client(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("DB_PATH", str(tmp_path / "securedev.db"))
+    monkeypatch.setenv("ADMIN_PASSWORD", ADMIN[1])
+    monkeypatch.setenv("ALUMNO_PASSWORD", ALUMNO[1])
     _cargar("init_db", "init_db.py").crear_base_de_datos()
     app = _cargar("securedev_app", "app.py").app
     app.config.update(TESTING=True)

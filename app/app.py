@@ -1,92 +1,153 @@
-from flask import Flask, request, render_template_string, redirect, make_response
+"""SecureDev - versión corregida (v2.0).
+
+Mitigaciones aplicadas (ver docs/trazabilidad.md):
+  V-01 SQL Injection          -> consultas parametrizadas (placeholders ?)
+  V-02 Sesión falsificable    -> sesión firmada de Flask con SECRET_KEY
+  V-03 SSTI / V-04 XSS        -> plantillas en archivos con autoescape de Jinja2
+  V-05 CSRF                   -> token CSRF por sesión, validado en cada POST
+  V-06 Cookie sin flags       -> HttpOnly + SameSite=Strict (+ Secure configurable)
+  V-07 Contraseñas planas     -> hash con werkzeug.security (scrypt)
+  V-08 Cabeceras ausentes     -> CSP, X-Frame-Options, nosniff y políticas cross-origin
+  V-09 Fuerza bruta           -> bloqueo temporal tras 5 intentos fallidos (HTTP 429)
+  V-10 Modo debug             -> sin debug; ejecución con gunicorn
+"""
+import logging
+import os
+import secrets
 import sqlite3
+import time
 
-app = Flask(__name__)
+from flask import Flask, abort, redirect, render_template, request, session, url_for
+from werkzeug.security import check_password_hash
 
-def db_query(query):
-    """Función auxiliar para ejecutar queries (Vulnerable por diseño)"""
-    conn = sqlite3.connect('vulnerable.db')
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    # Aquí ocurre el SQLi: ejecutamos la string tal cual viene
-    cursor.execute(query)
-    result = cursor.fetchall()
-    conn.commit()
-    conn.close()
-    return result
+app = Flask(__name__, root_path=os.path.dirname(os.path.abspath(__file__)))
+app.config.update(
+    SECRET_KEY=os.environ.get("SECRET_KEY") or secrets.token_hex(32),
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Strict",
+    SESSION_COOKIE_SECURE=os.environ.get("SESSION_COOKIE_SECURE", "false").lower() == "true",
+    PERMANENT_SESSION_LIFETIME=1800,
+)
 
-# --- LOGIN (Vulnerable a SQL Injection) ---
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    if request.method == 'POST':
-        user = request.form.get('username')
-        pw = request.form.get('password')
-        
-        # El SQLi clásico: saltarse el password con ' OR '1'='1
-        query = f"SELECT * FROM usuarios WHERE username = '{user}' AND password = '{pw}'"
-        usuarios = db_query(query)
-        
-        if usuarios:
-            usuario = usuarios[0]
-            resp = make_response(redirect('/dashboard'))
-            # Vulnerable: Cookie de sesión en texto plano y sin flags de seguridad
-            resp.set_cookie('user_session', usuario['username'])
-            return resp
-        return "<h3>Acceso denegado</h3><a href='/login'>Volver</a>", 401
+DB_PATH = os.environ.get("DB_PATH", "securedev.db")
+MAX_INTENTOS = 5          # intentos fallidos permitidos
+VENTANA_BLOQUEO = 300     # segundos de bloqueo
+MAX_BIO = 280             # largo máximo de la biografía
 
-    return '''
-        <h2>Login del Sistema Académico</h2>
-        <form method="post">
-            Usuario: <input type="text" name="username"><br>
-            Password: <input type="password" name="password"><br>
-            <input type="submit" value="Ingresar">
-        </form>
-    '''
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+log = logging.getLogger("securedev")
+_fallidos = {}            # (ip, usuario) -> [timestamps de intentos fallidos]
 
-# --- DASHBOARD (Vulnerable a XSS y CSRF) ---
-@app.route('/dashboard')
-def dashboard():
-    username = request.cookies.get('user_session')
-    if not username:
-        return redirect('/login')
 
-    # Buscamos los datos del usuario logueado
-    datos = db_query(f"SELECT * FROM usuarios WHERE username = '{username}'")[0]
+def db_query(query, params=()):
+    """V-01: siempre con parámetros, nunca concatenando la entrada del usuario."""
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        return conn.execute(query, params).fetchall()
 
-    # Vulnerabilidad XSS: render_template_string no escapa variables puestas con f-strings
-    html = f"""
-    <h1>Panel de {datos['username']}</h1>
-    <p><b>Rol:</b> {datos['rol']}</p>
-    <p><b>Biografía:</b> {datos['bio']}</p>
-    <hr>
-    <h3>Actualizar Biografía (Objetivo CSRF)</h3>
-    <form action="/update_bio" method="POST">
-        <input type="text" name="nueva_bio" placeholder="Escribe algo...">
-        <input type="submit" value="Guardar Cambios">
-    </form>
-    <br><a href="/logout">Cerrar Sesión</a>
-    """
-    return render_template_string(html)
 
-@app.route('/update_bio', methods=['POST'])
-def update_bio():
-    username = request.cookies.get('user_session')
-    if username:
-        nueva_bio = request.form.get('nueva_bio')
-        # Vulnerable a CSRF: No hay token de validación
-        db_query(f"UPDATE usuarios SET bio = '{nueva_bio}' WHERE username = '{username}'")
-    return redirect('/dashboard')
+# --- V-05: protección CSRF ---------------------------------------------------
+def csrf_token():
+    if "_csrf" not in session:
+        session["_csrf"] = secrets.token_urlsafe(32)
+    return session["_csrf"]
 
-@app.route('/logout')
-def logout():
-    resp = make_response(redirect('/login'))
-    resp.set_cookie('user_session', '', expires=0)
+
+app.jinja_env.globals["csrf_token"] = csrf_token
+
+
+@app.before_request
+def validar_csrf():
+    if request.method == "POST":
+        esperado = session.get("_csrf", "")
+        recibido = request.form.get("csrf_token", "")
+        if not esperado or not secrets.compare_digest(esperado, recibido):
+            log.warning("CSRF rechazado ip=%s ruta=%s", request.remote_addr, request.path)
+            abort(400)
+
+
+# --- V-08: cabeceras de seguridad --------------------------------------------
+@app.after_request
+def cabeceras_seguridad(resp):
+    resp.headers["Content-Security-Policy"] = (
+        "default-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'self'"
+    )
+    resp.headers["X-Frame-Options"] = "DENY"
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["Referrer-Policy"] = "no-referrer"
+    resp.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    resp.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+    resp.headers["Cross-Origin-Resource-Policy"] = "same-origin"
+    resp.headers["Cross-Origin-Embedder-Policy"] = "require-corp"
+    resp.headers["Cache-Control"] = "no-store"
     return resp
 
-@app.route('/')
-def home():
-    return redirect('/login')
 
-if __name__ == '__main__':
-    # Ejecución en modo debug para fines académicos
-    app.run(debug=True, port=5000)
+# --- V-09: limitación de intentos ---------------------------------------------
+def _bloqueado(clave):
+    ahora = time.time()
+    _fallidos[clave] = [t for t in _fallidos.get(clave, []) if ahora - t < VENTANA_BLOQUEO]
+    return len(_fallidos[clave]) >= MAX_INTENTOS
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        user = request.form.get("username", "")
+        pw = request.form.get("password", "")
+        clave = (request.remote_addr, user)
+        if _bloqueado(clave):
+            log.warning("Login BLOQUEADO ip=%s usuario=%r", request.remote_addr, user)
+            return render_template("login.html", error="Demasiados intentos. Intente más tarde."), 429
+
+        filas = db_query("SELECT username, password FROM usuarios WHERE username = ?", (user,))
+        if filas and check_password_hash(filas[0]["password"], pw):
+            _fallidos.pop(clave, None)
+            session.clear()                      # evita fijación de sesión
+            session["user"] = filas[0]["username"]
+            log.info("Login OK ip=%s usuario=%r", request.remote_addr, user)
+            return redirect(url_for("dashboard"))
+
+        _fallidos.setdefault(clave, []).append(time.time())
+        log.warning("Login FALLIDO ip=%s usuario=%r", request.remote_addr, user)
+        return render_template("login.html", error="Acceso denegado"), 401
+
+    return render_template("login.html")
+
+
+@app.route("/dashboard")
+def dashboard():
+    username = session.get("user")              # V-02: sesión firmada, no una cookie editable
+    if not username:
+        return redirect(url_for("login"))
+    datos = db_query("SELECT username, rol, bio FROM usuarios WHERE username = ?", (username,))
+    if not datos:
+        session.clear()
+        return redirect(url_for("login"))
+    return render_template("dashboard.html", datos=datos[0])   # V-03/V-04: autoescape
+
+
+@app.route("/update_bio", methods=["POST"])
+def update_bio():
+    username = session.get("user")
+    if not username:
+        return redirect(url_for("login"))
+    nueva_bio = request.form.get("nueva_bio", "")[:MAX_BIO]
+    db_query("UPDATE usuarios SET bio = ? WHERE username = ?", (nueva_bio, username))
+    return redirect(url_for("dashboard"))
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+
+@app.route("/")
+def home():
+    return redirect(url_for("login"))
+
+
+if __name__ == "__main__":
+    # V-10: sin debug; en producción se ejecuta con gunicorn (ver Dockerfile)
+    app.run(host="127.0.0.1", port=5000)

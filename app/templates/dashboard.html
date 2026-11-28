@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="es">
+<head><meta charset="utf-8"><title>Panel - SecureDev</title></head>
+<body>
+  <h1>Panel de {{ datos['username'] }}</h1>
+  <p><b>Rol:</b> {{ datos['rol'] }}</p>
+  <p><b>Biografía:</b> {{ datos['bio'] }}</p>
+  <hr>
+  <h3>Actualizar Biografía</h3>
+  <form action="/update_bio" method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="text" name="nueva_bio" maxlength="280" placeholder="Escribe algo...">
+    <input type="submit" value="Guardar Cambios">
+  </form>
+  <br><a href="/logout">Cerrar Sesión</a>
+</body>
+</html>
