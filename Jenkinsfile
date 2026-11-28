@@ -76,7 +76,7 @@ pipeline {
         stage('Pruebas') {
             steps {
                 sh '''
-                    .venv/bin/pytest tests/test_funcional.py -v -p no:warnings --junitxml=reports/junit-funcional.xml
+                    .venv/bin/pytest tests/test_funcional.py tests/test_monitoreo.py -v -p no:warnings --junitxml=reports/junit-funcional.xml
                 '''
                 catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                     sh '''
@@ -93,10 +93,9 @@ pipeline {
                 withCredentials([string(credentialsId: 'securedev-admin-pass', variable: 'ADMIN_PASSWORD'),
                                  string(credentialsId: 'securedev-alumno-pass', variable: 'ALUMNO_PASSWORD')]) {
                     sh '''
-                        export SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
                         docker rm -f ${STAGING} >/dev/null 2>&1 || true
                         docker run -d --name ${STAGING} --network ${NET} -p 5001:5000 \
-                            -e ADMIN_PASSWORD -e ALUMNO_PASSWORD -e SECRET_KEY ${IMAGE}
+                            -e ADMIN_PASSWORD -e ALUMNO_PASSWORD ${IMAGE}
                         for i in $(seq 1 30); do
                             curl -fs -o /dev/null http://${STAGING}:5000/login && echo "Staging disponible" && exit 0
                             sleep 2
@@ -141,10 +140,9 @@ pipeline {
                 withCredentials([string(credentialsId: 'securedev-admin-pass', variable: 'ADMIN_PASSWORD'),
                                  string(credentialsId: 'securedev-alumno-pass', variable: 'ALUMNO_PASSWORD')]) {
                     sh '''
-                        export SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
                         docker rm -f ${PROD} >/dev/null 2>&1 || true
                         docker run -d --name ${PROD} --network ${NET} -p 5000:5000 --restart unless-stopped \
-                            -e ADMIN_PASSWORD -e ALUMNO_PASSWORD -e SECRET_KEY ${IMAGE}
+                            -e ADMIN_PASSWORD -e ALUMNO_PASSWORD ${IMAGE}
                         echo "Producción actualizada con ${IMAGE}"
                     '''
                 }
