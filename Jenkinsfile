@@ -89,15 +89,21 @@ pipeline {
 
         stage('Despliegue (staging)') {
             steps {
-                sh '''
-                    docker rm -f ${STAGING} >/dev/null 2>&1 || true
-                    docker run -d --name ${STAGING} --network ${NET} -p 5001:5000 ${IMAGE}
-                    for i in $(seq 1 30); do
-                        curl -fs -o /dev/null http://${STAGING}:5000/login && echo "Staging disponible" && exit 0
-                        sleep 2
-                    done
-                    docker logs ${STAGING}; exit 1
-                '''
+                // Secretos desde las credenciales de Jenkins (nunca en el repositorio)
+                withCredentials([string(credentialsId: 'securedev-admin-pass', variable: 'ADMIN_PASSWORD'),
+                                 string(credentialsId: 'securedev-alumno-pass', variable: 'ALUMNO_PASSWORD')]) {
+                    sh '''
+                        export SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+                        docker rm -f ${STAGING} >/dev/null 2>&1 || true
+                        docker run -d --name ${STAGING} --network ${NET} -p 5001:5000 \
+                            -e ADMIN_PASSWORD -e ALUMNO_PASSWORD -e SECRET_KEY ${IMAGE}
+                        for i in $(seq 1 30); do
+                            curl -fs -o /dev/null http://${STAGING}:5000/login && echo "Staging disponible" && exit 0
+                            sleep 2
+                        done
+                        docker logs ${STAGING}; exit 1
+                    '''
+                }
             }
         }
 
@@ -131,11 +137,16 @@ pipeline {
 
         stage('Despliegue (producción)') {
             steps {
-                sh '''
-                    docker rm -f ${PROD} >/dev/null 2>&1 || true
-                    docker run -d --name ${PROD} --network ${NET} -p 5000:5000 --restart unless-stopped ${IMAGE}
-                    echo "Producción actualizada con ${IMAGE}"
-                '''
+                withCredentials([string(credentialsId: 'securedev-admin-pass', variable: 'ADMIN_PASSWORD'),
+                                 string(credentialsId: 'securedev-alumno-pass', variable: 'ALUMNO_PASSWORD')]) {
+                    sh '''
+                        export SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+                        docker rm -f ${PROD} >/dev/null 2>&1 || true
+                        docker run -d --name ${PROD} --network ${NET} -p 5000:5000 --restart unless-stopped \
+                            -e ADMIN_PASSWORD -e ALUMNO_PASSWORD -e SECRET_KEY ${IMAGE}
+                        echo "Producción actualizada con ${IMAGE}"
+                    '''
+                }
             }
         }
     }
