@@ -10,6 +10,8 @@ Mitigaciones aplicadas (ver docs/trazabilidad.md):
   V-08 Cabeceras ausentes     -> CSP, X-Frame-Options, nosniff y políticas cross-origin
   V-09 Fuerza bruta           -> bloqueo temporal tras 5 intentos fallidos (HTTP 429)
   V-10 Modo debug             -> sin debug; ejecución con gunicorn
+
+Monitorización: /metrics expone métricas de seguridad para Prometheus/Grafana.
 """
 import logging
 import os
@@ -18,6 +20,7 @@ import sqlite3
 import time
 
 from flask import Flask, abort, redirect, render_template, request, session, url_for
+from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, Counter, generate_latest
 from werkzeug.security import check_password_hash
 
 app = Flask(__name__, root_path=os.path.dirname(os.path.abspath(__file__)))
@@ -37,6 +40,17 @@ MAX_BIO = 280             # largo máximo de la biografía
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("securedev")
 _fallidos = {}            # (ip, usuario) -> [timestamps de intentos fallidos]
+
+# --- Monitorización: métricas de seguridad (Prometheus) ----------------------
+METRICAS = CollectorRegistry()
+LOGIN_INTENTOS = Counter("securedev_login_intentos", "Intentos de login por resultado",
+                         ["resultado"], registry=METRICAS)
+CSRF_RECHAZOS = Counter("securedev_csrf_rechazos", "POST rechazados por token CSRF inválido",
+                        registry=METRICAS)
+HTTP_RESPUESTAS = Counter("securedev_http_respuestas", "Respuestas HTTP por ruta y código",
+                          ["ruta", "estado"], registry=METRICAS)
+for _resultado in ("exito", "fallido", "bloqueado"):
+    LOGIN_INTENTOS.labels(_resultado)
 
 
 def db_query(query, params=()):
@@ -63,6 +77,7 @@ def validar_csrf():
         recibido = request.form.get("csrf_token", "")
         if not esperado or not secrets.compare_digest(esperado, recibido):
             log.warning("CSRF rechazado ip=%s ruta=%s", request.remote_addr, request.path)
+            CSRF_RECHAZOS.inc()
             abort(400)
 
 
@@ -80,6 +95,9 @@ def cabeceras_seguridad(resp):
     resp.headers["Cross-Origin-Resource-Policy"] = "same-origin"
     resp.headers["Cross-Origin-Embedder-Policy"] = "require-corp"
     resp.headers["Cache-Control"] = "no-store"
+    if request.path != "/metrics":
+        ruta = request.url_rule.rule if request.url_rule else "desconocida"
+        HTTP_RESPUESTAS.labels(ruta, str(resp.status_code)).inc()
     return resp
 
 
@@ -98,6 +116,7 @@ def login():
         clave = (request.remote_addr, user)
         if _bloqueado(clave):
             log.warning("Login BLOQUEADO ip=%s usuario=%r", request.remote_addr, user)
+            LOGIN_INTENTOS.labels("bloqueado").inc()
             return render_template("login.html", error="Demasiados intentos. Intente más tarde."), 429
 
         filas = db_query("SELECT username, password FROM usuarios WHERE username = ?", (user,))
@@ -106,10 +125,12 @@ def login():
             session.clear()                      # evita fijación de sesión
             session["user"] = filas[0]["username"]
             log.info("Login OK ip=%s usuario=%r", request.remote_addr, user)
+            LOGIN_INTENTOS.labels("exito").inc()
             return redirect(url_for("dashboard"))
 
         _fallidos.setdefault(clave, []).append(time.time())
         log.warning("Login FALLIDO ip=%s usuario=%r", request.remote_addr, user)
+        LOGIN_INTENTOS.labels("fallido").inc()
         return render_template("login.html", error="Acceso denegado"), 401
 
     return render_template("login.html")
@@ -141,6 +162,12 @@ def update_bio():
 def logout():
     session.clear()
     return redirect(url_for("login"))
+
+
+@app.route("/metrics")
+def metricas():
+    """Endpoint que consulta Prometheus (red interna devsecops)."""
+    return generate_latest(METRICAS), 200, {"Content-Type": CONTENT_TYPE_LATEST}
 
 
 @app.route("/")

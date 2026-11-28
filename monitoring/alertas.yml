@@ -1,0 +1,36 @@
+# Reglas de alerta: detección de incidentes de seguridad en producción
+groups:
+  - name: securedev-seguridad
+    rules:
+      - alert: FuerzaBrutaLogin
+        expr: sum(increase(securedev_login_intentos_total{resultado=~"fallido|bloqueado"}[2m])) > 10
+        for: 10s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Posible ataque de fuerza bruta contra /login"
+          description: "Más de 10 intentos de login fallidos o bloqueados en 2 minutos."
+
+      - alert: AtaqueCSRF
+        expr: sum(increase(securedev_csrf_rechazos_total[2m])) > 3
+        for: 10s
+        labels:
+          severity: warning
+        annotations:
+          summary: "Peticiones POST sin token CSRF válido"
+          description: "Se rechazaron más de 3 peticiones por token CSRF inválido en 2 minutos."
+
+      - alert: ErroresServidor
+        expr: sum(increase(securedev_http_respuestas_total{estado=~"5.."}[5m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "La aplicación está respondiendo errores 5xx"
+
+      - alert: AplicacionCaida
+        expr: up{job="securedev-app"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Producción no responde a Prometheus"
