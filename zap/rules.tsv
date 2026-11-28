@@ -1,0 +1,3 @@
+# Reglas de OWASP ZAP (formato: id<TAB>acción<TAB>(justificación))
+# Cada excepción debe estar justificada y revisada. Ver docs/trazabilidad.md
+90027	IGNORE	(Cookie Slack Detector: falso positivo. /login es público; al omitir la cookie de sesión se genera un token CSRF nuevo y la respuesta cambia por diseño)

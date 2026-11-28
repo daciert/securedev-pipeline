@@ -113,9 +113,10 @@ pipeline {
                     sh '''
                         chmod 777 /zap/wrk
                         rm -f /zap/wrk/zap-report.*
+                        cp zap/rules.tsv /zap/wrk/rules.tsv   # excepciones justificadas (falsos positivos)
                         rc=0
                         docker run --rm --network ${NET} -v zap-wrk:/zap/wrk:rw zaproxy/zap-stable \
-                            zap-full-scan.py -t http://${STAGING}:5000 -m 2 -T 20 \
+                            zap-full-scan.py -t http://${STAGING}:5000 -m 2 -T 20 -c rules.tsv \
                             -r zap-report.html -J zap-report.json -w zap-report.md || rc=$?
                         cp /zap/wrk/zap-report.* reports/ 2>/dev/null || true
                         exit $rc
