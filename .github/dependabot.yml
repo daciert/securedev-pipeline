@@ -1,17 +1,24 @@
+# Gestión automática de dependencias (Dependabot)
 version: 2
 updates:
+  # Librerías Python (requirements.txt y requirements-dev.txt)
   - package-ecosystem: "pip"
     directory: "/"
     schedule:
       interval: "daily"
     open-pull-requests-limit: 10
-    labels: ["dependencies", "security"]
     commit-message:
       prefix: "deps"
+    # Flask, Werkzeug, Jinja2, MarkupSafe, itsdangerous y click dependen entre sí:
+    # se agrupan en un solo PR para que el conjunto siempre sea compatible.
+    groups:
+      python-dependencies:
+        patterns: ["*"]
+
+  # Imagen base del Dockerfile
   - package-ecosystem: "docker"
     directory: "/"
     schedule:
       interval: "weekly"
-    labels: ["dependencies", "docker"]
     commit-message:
       prefix: "deps(docker)"

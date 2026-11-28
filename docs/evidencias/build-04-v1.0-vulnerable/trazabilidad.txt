@@ -1,0 +1,7 @@
+build:   #4
+fecha:   2026-11-27T23:44:12+00:00
+rama:    origin/main
+commit:  1c98e3ba5e39c4fa3ef7b5552bc2b6ec42b14290
+autor:   Dacier Tapia <dac.tapia@duocuc.cl>
+mensaje: fix(ci): conserva código de salida de escáneres y limpia logs
+imagen:  securedev-app:4
